@@ -53,7 +53,7 @@ def load_vectorstore(uploaded_files):
         file_paths.append(str(save_path))
 
     # 2. Splitting, Embedding, and Upserting
-    for file_path in file_paths: # NOTE: Using file_paths here
+    for file_path in file_paths:
         loader = PyPDFLoader(file_path)
         documents = loader.load()
 
@@ -61,9 +61,16 @@ def load_vectorstore(uploaded_files):
         chunks = splitter.split_documents(documents)
 
         texts = [chunk.page_content for chunk in chunks]
-        metadata = [chunk.metadata for chunk in chunks]
+        
+        # FIX: Include the text content in metadata!
+        metadata = [
+            {
+                **chunk.metadata,  # Keep existing metadata (source, page, etc.)
+                "text": chunk.page_content  # Add the actual text content
+            }
+            for chunk in chunks
+        ]
 
-        # CORRECTED: Use len(chunks) to get the size for range()
         ids = [f"{Path(file_path).stem} - {i}" for i in range(len(chunks))]
 
         # Embedding is done in a single call for efficiency
@@ -71,17 +78,17 @@ def load_vectorstore(uploaded_files):
         embedding = embed_model.embed_documents(texts)
         
         # 3. Upserting (Recommended: Batching for stability and progress tracking)
-        BATCH_SIZE = 100 # Define your batch size
+        BATCH_SIZE = 100
         
         # Combine vectors, ids, and metadata into iterable data
-        data_to_upsert = zip(ids, embedding, metadata)
+        data_to_upsert = list(zip(ids, embedding, metadata))
         
         print(f"Upserting embeddings in batches of {BATCH_SIZE}...")
         
         # Use tqdm to show progress through the batches
         for i in tqdm(range(0, len(embedding), BATCH_SIZE), desc="Upserting to Pinecone"):
             i_end = min(i + BATCH_SIZE, len(embedding))
-            batch = [next(data_to_upsert) for _ in range(BATCH_SIZE) if i + _ < len(embedding)]
+            batch = data_to_upsert[i:i_end]
 
             # The upsert call expects (id, vector, metadata)
             index.upsert(vectors=batch)
